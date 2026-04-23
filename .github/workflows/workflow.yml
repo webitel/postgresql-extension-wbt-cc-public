@@ -1,0 +1,118 @@
+name: Workflow (pg-wbt-cc)
+
+run-name: "${{ inputs.commit-message }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit-message:
+        type: string
+        required: true
+        description: Latest commit message to include in run name.
+
+      triggered-branch:
+        type: string
+        required: true
+        description: Triggered branch from original repository to calculate latest version.
+
+      repository-environment:
+        type: string
+        required: true
+        description: Linked environment for upload build to repository (eg. acceptance, v25.04-releases, ...).
+
+      artifact-actions-run-id:
+        type: string
+        required: true
+        description: The id of the workflow run where the desired download artifact was uploaded from.
+
+      arch-matrix:
+        type: string
+        required: true
+        description: JSON array of target architectures (e.g., ["amd64","arm64"] or ["all"]).
+
+      codename-matrix:
+        type: string
+        required: true
+        description: JSON array of Debian codenames (e.g., ["bookworm","trixie"]).
+
+      deb-component:
+        type: string
+        required: true
+        description: Component of the APT repository (e.g., dev, v25.04-releases).
+
+      version:
+        type: string
+        required: true
+        description: Calculated version of the build (e.g., v25.04).
+
+      package-label:
+        type: string
+        required: true
+        description: Logical package name for display in job names.
+
+      deb-package-pattern:
+        type: string
+        required: true
+        description: Artifact pattern of the Debian package to deploy and publish.
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.triggered-branch }}-${{ inputs.package-label }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy (${{ inputs.package-label }}/${{ matrix.arch }})
+    strategy:
+      matrix:
+        arch: ${{ fromJSON(inputs.arch-matrix) }}
+
+    uses: webitel/reusable-workflows/.github/workflows/_deploy.yml@v2
+    secrets: inherit
+    with:
+      triggered-branch: ${{ inputs.triggered-branch }}
+      repository-environment: ${{ inputs.repository-environment }}
+      deb-package-pattern: ${{ inputs.deb-package-pattern }}
+      arch: ${{ matrix.arch }}
+      github-app-client-id: ${{ vars.DELIVERY_BOT_CLIENT_ID }}
+      artifact-repository-owner: ${{ github.repository_owner }}
+      artifact-repository: postgresql-extension-wbt-cc
+      artifact-actions-run-id: ${{ inputs.artifact-actions-run-id }}
+
+  publish:
+    name: Publish (${{ inputs.package-label }}/${{ matrix.arch }}/${{ matrix.codename }})
+    needs: [ deploy ]
+    strategy:
+      matrix:
+        arch: ${{ fromJSON(inputs.arch-matrix) }}
+        codename: ${{ fromJSON(inputs.codename-matrix) }}
+
+    uses: webitel/reusable-workflows/.github/workflows/_publish-deb.yml@v2
+    secrets: inherit
+    with:
+      arch: ${{ matrix.arch }}
+      repository-environment: ${{ inputs.repository-environment }}
+      deb-package-pattern: ${{ inputs.deb-package-pattern }}
+      deb-component: ${{ inputs.deb-component }}
+      deb-codename: ${{ matrix.codename }}
+      deb-s3-bucket-name: ${{ vars.DEB_S3_BUCKET_NAME }}
+      deb-s3-bucket-region: ${{ vars.DEB_S3_DEFAULT_REGION }}
+      deb-s3-endpoint: ${{ vars.DEB_S3_ENDPOINT }}
+      deb-s3-force-path-style: ${{ vars.DEB_S3_FORCE_PATH_STYLE == 'true' }}
+      github-app-client-id: ${{ vars.DELIVERY_BOT_CLIENT_ID }}
+      artifact-repository-owner: ${{ github.repository_owner }}
+      artifact-repository: postgresql-extension-wbt-cc
+      artifact-actions-run-id: ${{ inputs.artifact-actions-run-id }}
+
+  release:
+    name: Release
+    needs: [ publish ]
+    if: inputs.triggered-branch != github.event.repository.default_branch && needs.publish.result == 'success'
+    uses: webitel/reusable-workflows/.github/workflows/_release.yml@v2
+    permissions: { contents: write }
+    with:
+      tag: ${{ format('{0}-{1}', inputs.version, github.run_number) }}
