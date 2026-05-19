@@ -73,6 +73,7 @@ jobs:
 
     uses: webitel/reusable-workflows/.github/workflows/_deploy.yml@v2
     secrets: inherit
+    continue-on-error: true
     with:
       triggered-branch: ${{ inputs.triggered-branch }}
       repository-environment: ${{ inputs.repository-environment }}
