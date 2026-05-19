@@ -73,7 +73,6 @@ jobs:
 
     uses: webitel/reusable-workflows/.github/workflows/_deploy.yml@v2
     secrets: inherit
-    continue-on-error: true
     with:
       triggered-branch: ${{ inputs.triggered-branch }}
       repository-environment: ${{ inputs.repository-environment }}
@@ -93,6 +92,7 @@ jobs:
         codename: ${{ fromJSON(inputs.codename-matrix) }}
 
     uses: webitel/reusable-workflows/.github/workflows/_publish-deb.yml@v2
+    if: ${{ !cancelled() }}
     secrets: inherit
     with:
       arch: ${{ matrix.arch }}
